@@ -1,0 +1,346 @@
+//Este programa corresponde a una "Destructora de Tickets" diseñada para un centro de entretenimiento por Franco Spitale (estudiante de Ingeníeria Electrónica)
+//La variable sensor_1 correspondiente al pin A0 del PIc 16f876, chequea el estado del primer sensor de la destructora que "enciende" el motor
+//La variable sensor_2 verifica el estado del segundo sensor, que es el encargado de contar los tickets
+//La variable grabar corresponde a un pulsador que al accionarlo, el programa graba en memoria un número de 32 bits, teniendo que fraccionarse en 4 partes para poder almacenarlo en la EEPROM del PIC
+//El pulsador read se utiliza para visualizar cada uno de los 7 números, teniendo que pulsarse 7 veces este pulsador para que salga del "modo lectura"
+//Estos 7 números se van grabando en forma de memoria tambor, cuando llega al día 6 la siguiente memoria correspondera con el dia 0
+//El pulsador reset borra la cuenta actual visualizada en los display 7 segmentos
+//Presionando el pulsador "reset" y el pulsador "grabar" al mismo tiempo se resetea la cuenta acumulada que es visualizada en el display LCD
+//Con la interrupcion del timer 0 se genera la visualización en los display 7 segmentos mediante la función "Visualizar"
+
+#include <16F876A.h>
+#fuses nowdt, hs, noprotect, put, brownout, nolvp
+#USE DELAY(clock=20000000)
+#include <lcd.c>
+#define sensor_1 PIN_A0 // sensor que acciona el motor
+#define sensor_2 PIN_A1 // sensor que que cuenta los tickets
+#define motor_on PIN_A3 // pin acciona el motor
+#define grabar PIN_A4 //pulsador para grabar la cuenta correspondiente al dia actual
+#define read PIN_A5 //pulsador para leer las cuentas de los 7 dias grabados
+#define reset PIN_A2//pulsador para borrar la cuenta actual (pero no la memoria, ya que la memoria es tambor y la misma se sobreescribe al pasar los 7 dias)
+#define transistor4 PIN_C4//transitores para realizar el multiplexado de los display
+#define transistor3 PIN_C5
+#define transistor1 PIN_C7
+#define transistor2 PIN_C6
+
+static char d1;
+static char d2;
+static char d3;
+static char d4;
+static int16 t;
+
+visualizar (char d1,char d2,char d3,char d4);//funcion pra visualizar la cuenta en los display 7 segmentos, apraece constantemente en el programa para evitar parpadeo
+
+#INT_TIMER0
+void interrupcion(void)
+
+{
+set_timer0(30); //reset TMR0
+visualizar (d1,d2,d3,d4);
+t++;
+if(t==430)
+{
+output_bit(motor_on,0);
+}
+}
+
+void main()
+{
+
+int8 dia=0;
+int8 indice=0;
+int8 lec=0;
+int8 dia_lec=0;
+int32 ticket=0;
+int32 lectura=0;
+int mem_encendido=0;
+int32 a1=0;
+int32 a2=0;
+int32 a3=0;
+int32 a4=0;
+int memoria=30;
+char write=0;
+
+set_tris_c(0xFF);
+set_tris_b(00000001);
+set_tris_a(110111);
+
+lcd_init();//inicializacion del lcd
+Lcd_putc ("\f"); //limpio pantalla
+
+if(mem_encendido==0) //este if se utiliza para que siempre al energizar el micro, cargue el ultimo valor mostrado en el lcd
+{
+disable_interrupts(INT_TIMER0);
+a1 = read_eeprom(memoria) & 0x000000FF; // aca se recupera el valor grabado en la posicion 30 (memoria = 30)
+delay_ms(5);
+a2 = read_eeprom(memoria+1) & 0x000000FF; // ya que la eeprom es de 8 bits y la variable tickets es de 32 se debe fraccionar el numero en 4
+delay_ms(5);
+a3 = read_eeprom(memoria+2) & 0x000000FF;
+delay_ms(5);
+a4 = read_eeprom(memoria+3) & 0x000000FF;
+ticket = a1 | (a2 << 8) | (a3 << 16) | (a4 << 24) ; // aca se reconstruye el numero de 32 bits
+
+dia=read_eeprom(40);
+indice=read_eeprom(41);
+
+mem_encendido=1;// bandera para que solo entre una sola ves al if de mem_encendido
+
+lcd_gotoxy(1,1);
+
+printf(lcd_putc," Neverland");
+
+lcd_gotoxy(2,2);
+
+printf(lcd_putc,"Ares SA");
+
+delay_ms(2000);
+
+lcd_putc ("\f");
+}
+
+setup_timer_0(RTCC_INTERNAL|RTCC_DIV_256);
+
+set_timer0(30);
+enable_interrupts(GLOBAL);
+enable_interrupts(INT_TIMER0);
+
+set_tris_c(0x00);
+while(1)
+{
+if(input(sensor_1))//el sensor normalmente esta en cero, entonces con este while se espera el momento en el que se produzca el flanco de subida
+{
+delay_ms(1);
+if(input(sensor_1))//detecta el flanco de bajada, que se produce cuando el sensor detecta una muesca del ticket
+{
+output_bit(motor_on,1);
+t=0;
+}
+
+         }
+while(input(sensor_2))//el sensor normalmente esta en cero, entonces con este while se espera el momento en el que se produzca el flanco de subida
+{
+
+           delay_ms(5);
+           if(!input(sensor_2))//detecta el flanco de bajada, que se produce cuando el sensor detecta una muesca del ticket
+              {
+              ticket++;//contador de muescas para el Lcd
+              d1++;
+              write=1;
+              
+              }
+                
+         }
+              if(d1==10) // si el primer display llega a 10 reseteamos la cuenta e incrementamos el siguiente display
+              {
+              d1=0;
+              d2++;//incremento el segundo diplay
+              }
+                      
+              if(d2==10)//si el segundo display llega a 10 incremento el tercero, lo mismo para el ultimo diplay
+              {
+              d2=0;
+              d3++;
+              }
+                      
+              if(d3==10)
+              {
+              d3=0;
+              d4++;
+              }  
+lcd_gotoxy(1,1); // posicionamos el cursor del lcd en la fila 1 y columna 1
+printf(lcd_putc,"Cuenta Acumulada %lu ",ticket);//visualizo en el display lcd la cuenta acumulada "tickets"isualizar (d1,d2,d3,d4);
+lcd_gotoxy(2,2);
+printf(lcd_putc,"%lu ",ticket);
+if(write==1)
+{
+
+                         write_eeprom(memoria,   (ticket & 0x000000FF)); 
+                         delay_ms(5);
+                         write_eeprom(memoria+1, ((ticket & 0x0000FF00) >> 8));
+                         delay_ms(5);
+                         write_eeprom(memoria+2, ((ticket & 0x00FF0000) >> 16));
+                         delay_ms(5);
+                         write_eeprom(memoria+3, ((ticket & 0xFF000000) >> 24));
+                         delay_ms(5);
+                         write=0;
+                         }
+if(!input(reset)) // pulsador para resetear la cuenta en los display de 7 segmentos
+{
+delay_ms(20);
+if(!input(reset))
+{
+d1=d2=d3=d4=0;//pongo en cero los disp de 7 seg
+dia=0;
+
+  //visualizar (d1,d2,d3,d4);
+  }
+}
+
+if(!input(reset) && !input(grabar))
+{
+disable_interrupts(INT_TIMER0);
+delay_ms(5000);
+
+if(!input(reset) && !input(grabar))
+{
+
+  ticket=0;
+  d1=d2=d3=d4=0;//pongo en cero los disp de 7 seg
+  dia=0;
+  
+  Lcd_putc ("\f");//limpio pantalla lcd
+  
+     write_eeprom(memoria, 0); 
+     delay_ms(5);
+     write_eeprom(memoria+1, 0);
+     delay_ms(5);
+     write_eeprom(memoria+2, 0);
+     delay_ms(5);
+     write_eeprom(memoria+3, 0);
+     delay_ms(5);
+     
+     write_eeprom(40,0);
+     delay_ms(5);
+     write_eeprom(41,0);
+  lcd_gotoxy(1,1);
+  printf(lcd_putc,"Memoria Borrada");
+  delay_ms(2000);     
+  enable_interrupts(INT_TIMER0);     
+ }
+}
+if(!input(grabar))//pulsador para grabar la cuenta acumulada durante el dia vigente
+{
+delay_ms(20);
+
+  while(!input(grabar)) // si se mantiene presionado el pulsador no sale de este bucle
+  {
+  delay_ms(1);
+  }
+                      
+                       disable_interrupts(INT_TIMER0);                  
+                       write_eeprom(dia + indice,    (ticket & 0x000000FF)); // grabamos en la posicion de memoria "dia+indice" la cuenta actual
+                       delay_ms(5);
+                       write_eeprom(dia + indice +1, ((ticket & 0x0000FF00) >> 8));//el indice sirve para moverse de a 4 posiciones de memoria por cada dia
+                       delay_ms(5);
+                       write_eeprom(dia + indice +2, ((ticket & 0x00FF0000) >> 16));
+                       delay_ms(5);
+                       write_eeprom(dia + indice +3, ((ticket & 0xFF000000) >> 24));
+                       delay_ms(5);
+                     
+                       a1 = read_eeprom(dia + indice) & 0x000000FF; // leemos la eeprom para verificar que se grabo efectivamente la cuenta
+                       delay_ms(5);
+                       a2 = read_eeprom(dia + indice + 1) & 0x000000FF;
+                       delay_ms(5);
+                       a3 = read_eeprom(dia + indice + 2) & 0x000000FF;
+                       delay_ms(5);
+                       a4 = read_eeprom(dia + indice + 3) & 0x000000FF;
+                       delay_ms(5);
+                       
+                       lectura = a1 | (a2 << 8) | (a3 << 16) | (a4 << 24) ;
+                 
+                 lcd_gotoxy(1,1);
+                 printf(lcd_putc,"Grabando dia %i      ",dia);
+                 lcd_gotoxy(2,2);
+                 printf(lcd_putc,"%lu ",lectura);
+                
+                 dia++;//incrementamos esta variable para que en la siguiente grabacion poder hubicar la cuenta en otra posicion de memoria
+                                      
+                 indice += 3;//incrementamos en 3 el indice para que la proxima ves que se grabe no se superponga con el dia anterior
+                 
+                                     
+                 if(dia>=7)//se resetea la variable dia, de esta manera se genera la memoria tambor y solo se pueden grabar 7 numeros en la memoria
+                    {
+                    dia=0;
+                    indice=0;
+                    }               
+                 
+                 write_eeprom(40,dia); // grabamos en la posición 40 de la eeprom el numnero del dia, para que al otro dia no se sobreescriba en la misma posición sino en la siguiente
+                 delay_ms(5);
+                 write_eeprom(41,indice);
+                 
+                 delay_ms(2000);//para que quede 2 segundos la visualizacion de la grabacion realizada
+                 lcd_gotoxy(1,1);
+                 lcd_putc ("\f");
+                 lcd_gotoxy(2,2);
+                 lcd_putc ("\f");  
+enable_interrupts(INT_TIMER0);
+}
+
+if(!input(read))//pulsador para leer las 7 grabaciones realizadas
+{
+
+delay_ms(20);
+
+       if(!input(read))
+       {
+       disable_interrupts(INT_TIMER0);
+       while (lec<21) //while para que no salga del "modo lectura" hasta que no se leean los 7 dias
+            {
+
+                       a1 = read_eeprom(lec + dia_lec) & 0x000000FF; // leemos la eeprom para verificar que se grabo efectivamente la cuenta
+                       delay_ms(5);
+                       a2 = read_eeprom(lec + dia_lec + 1) & 0x000000FF;
+                       delay_ms(5);
+                       a3 = read_eeprom(lec + dia_lec + 2) & 0x000000FF;
+                       delay_ms(5);
+                       a4 = read_eeprom(lec + dia_lec + 3) & 0x000000FF;
+                       
+                       lectura = a1 | (a2 << 8) | (a3 << 16) | (a4 << 24) ;
+                   
+                       
+                       
+                        while(input(read))
+                        {
+                        delay_ms(1);
+                        }
+                        
+                        delay_ms(500);
+                        lcd_gotoxy(1,1);
+                        printf(lcd_putc,"Memoria dia %i         ",dia_lec);
+                        lcd_gotoxy(2,2);
+                        printf(lcd_putc,"%lu              ",lectura);
+                                          
+                        dia_lec++;// al salir del bucle anterior se incrementa esta variable para mostrar la siguiente memoria
+                        lec += 3;
+            }
+
+                     while(input(read))
+                        {
+                        delay_ms(1);
+                        }
+                        delay_ms(500);
+                        lec=0;
+                        dia_lec=0;
+                        
+                        
+                     
+        }
+enable_interrupts(INT_TIMER0);
+}
+
+}
+}
+visualizar (char d1,char d2,char d3,char d4) //
+{
+
+unsigned char const segmentos[10]={0x0,0x1,0x2, 0x3,0x4, 0x5,0x6, 0x7, 0x8, 0x9};
+char salida=0;
+
+              salida=segmentos[d1];
+              salida= (salida & 0x0F) + 0x10; // con la and me quedo con los primeros 4 bits, con 0x70 prendo el transistor1
+              output_c(salida);
+              delay_ms(1);
+              salida=segmentos[d2];
+              salida= (salida & 0x0F) + 0x20; // con la and y 0x0f, me quedo con los primeros 4 bits, con 0xb0 prendo el transistor2
+              output_c(salida);
+              delay_ms(1);
+              salida=segmentos[d3];
+              salida= (salida & 0x0F) + 0x40; // con la and me quedo con los primeros 4 bits, con 0xd0 prendo el transistor3
+              output_c(salida);
+              delay_ms(1);
+              salida=segmentos[d4];
+              salida= (salida & 0x0F) + 0x80; // con la and me quedo con los primeros 4 bits, con 0x10 prendo el transistor4
+              output_c(salida);
+              delay_ms(1);
+              output_c(0x00);
+}
